@@ -1,0 +1,208 @@
+
+clc; clear; close all;
+
+%% Load Temperature Profile Data
+depth = [0, -15, -32.5, -50, -70, -90, -110];  % Depth levels (mm)
+
+% Temperature profiles
+temp_profiles = struct();
+temp_profiles.A1 = [39.9, 39.8762, 38.931, 37.986, 36.907, 35.827, 34.75];
+temp_profiles.A2 = [30.295, 30.07, 29.695, 29.323, 28.895, 28.468, 28.042];
+temp_profiles.A3 = [32.885, 32.003, 31.17, 30.341, 28.993, 28.446, 27.5];
+temp_profiles.A4 = [35.917, 34.22, 33.041, 31.693, 30.348, 29.672, 29];
+
+temp_profiles.B1 = temp_profiles.A1;
+temp_profiles.B2 = [64.04, 62, 58.164, 54.328, 49.945, 45.463, 41.19];
+temp_profiles.B3 = temp_profiles.A2;
+temp_profiles.B4 = [45.833, 45.274, 43.733, 42.195, 40.439, 38.682, 36.93];
+temp_profiles.B5 = temp_profiles.A3;
+temp_profiles.B6 = [44.194, 43.899, 41.351, 38.797, 33.433, 31.522, 30.07];
+temp_profiles.B7 = temp_profiles.A4;
+temp_profiles.B8 = [48.77, 47.47, 44.23, 43.78, 42.16, 40.18, 39.05];
+
+temp_profiles.C1 = temp_profiles.A1;
+temp_profiles.C2 = [39.992, 39.99, 39.113, 38.235, 37.233, 36.23, 35.23];
+temp_profiles.C3 = temp_profiles.A2;
+temp_profiles.C4 = [32.117, 31.91, 31.375, 30.84, 30.228, 29.617, 29.007];
+temp_profiles.C5 = temp_profiles.A3;
+temp_profiles.C6 = [32.526, 32.33, 31.857, 30.842, 29.992, 29.139, 28.29];
+temp_profiles.C7 = temp_profiles.A4;
+temp_profiles.C8 = [35.901, 35.38, 34.379, 33.378, 31.091, 30.25, 29.95];
+
+temp_profiles.D1 = temp_profiles.A2;
+temp_profiles.D2 = [28.269, 27.77, 27.6, 27.431, 27.237, 27.044, 26.85];
+temp_profiles.D3 = [27.3, 26.93, 26.834, 26.738, 26.628, 26.518, 26.409];
+temp_profiles.D4 = temp_profiles.A3;
+temp_profiles.D5 = [32.3, 31.87, 29.206, 28.662, 28.043, 27.139, 25.88];
+temp_profiles.D6 = [30.852, 30.02, 29.299, 28.578, 27.751, 26.337, 26.1];
+temp_profiles.D7 = temp_profiles.A4;
+temp_profiles.D8 = [33.11, 32.137, 31.163, 30.051, 28.942, 27.83, 27.83];
+temp_profiles.D9 = [31.84, 30.95, 30.06, 29.039, 28.019, 27.509, 27];
+
+%% Extract -110 mm temperature
+fields = fieldnames(temp_profiles);
+Y = zeros(length(fields),1);
+for i = 1:length(fields)
+    Y(i) = interp1(depth, temp_profiles.(fields{i}), -110, 'linear');
+end
+
+%% Define Parameters for Each Case (24 unique cases)
+ETs = [40 40 40 40 40 70 40 70 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40]; 
+Material = [1 2 3 4 1 1 2 2 1 1 2 2 3 3 1 1 1 2 2 2 3 3 3 4];
+Moisture = [0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0];
+Thickness = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 35 50 20 35 50 20 35 50 20];
+
+data = table(ETs', Material', Moisture', Thickness', Y(1:24), ...
+    'VariableNames', {'ETs','Material','Moisture','Thickness','Temp'});
+
+%% Morris Screening Sensitivity Analysis
+params = ["ETs","Material","Moisture","Thickness"];
+lb = [40,1,0,20];
+ub = [70,4,1,50];
+
+num_factors = length(params);
+num_repeats = 20;
+delta = (ub - lb)/4;
+mu_star = zeros(num_factors,1);
+sigma = zeros(num_factors,1);
+
+for i = 1:num_factors
+    effects = zeros(num_repeats,1);
+    
+    for j = 1:num_repeats
+        base_idx = randi(height(data));
+        x_base = [data.ETs(base_idx), data.Material(base_idx), data.Moisture(base_idx), data.Thickness(base_idx)];
+        y_base = data.Temp(base_idx);
+        
+        % Perturb parameter i
+        x_perturb = x_base;
+        x_perturb(i) = min(ub(i), max(lb(i), x_base(i) + delta(i)));
+        
+        % Find nearest experimental condition
+        dist = sum((table2array(data(:,1:4)) - x_perturb).^2,2);
+        [~, idx_nearest] = min(dist);
+        y_new = data.Temp(idx_nearest);
+        
+        % Elementary effect
+        effects(j) = (y_new - y_base) / delta(i);
+    end
+    
+    mu_star(i) = mean(abs(effects));
+    sigma(i) = std(effects);
+end
+
+%% Display and Plot
+Results = table(params', mu_star, sigma, 'VariableNames', {'Factor','MuStar','Sigma'});
+disp(Results);
+
+figure;
+scatter(mu_star, sigma, 100, 'filled');
+text(mu_star, sigma, params, 'FontSize', 12, 'VerticalAlignment', 'bottom', 'HorizontalAlignment', 'right');
+xlabel('\mu^* (Mean Effect)');
+ylabel('\sigma (Standard Deviation)');
+title('Morris Screening Sensitivity Analysis at -110 mm');
+grid on;
+Morris
+clc; clear; close all;
+
+%% Load Temperature Profile Data
+depth = [0, -15, -32.5, -50, -70, -90, -110];  % Depth levels (mm)
+
+% Temperature profiles
+temp_profiles = struct();
+temp_profiles.A1 = [39.9, 39.8762, 38.931, 37.986, 36.907, 35.827, 34.75];
+temp_profiles.A2 = [30.295, 30.07, 29.695, 29.323, 28.895, 28.468, 28.042];
+temp_profiles.A3 = [32.885, 32.003, 31.17, 30.341, 28.993, 28.446, 27.5];
+temp_profiles.A4 = [35.917, 34.22, 33.041, 31.693, 30.348, 29.672, 29];
+
+temp_profiles.B1 = temp_profiles.A1;
+temp_profiles.B2 = [64.04, 62, 58.164, 54.328, 49.945, 45.463, 41.19];
+temp_profiles.B3 = temp_profiles.A2;
+temp_profiles.B4 = [45.833, 45.274, 43.733, 42.195, 40.439, 38.682, 36.93];
+temp_profiles.B5 = temp_profiles.A3;
+temp_profiles.B6 = [44.194, 43.899, 41.351, 38.797, 33.433, 31.522, 30.07];
+temp_profiles.B7 = temp_profiles.A4;
+temp_profiles.B8 = [48.77, 47.47, 44.23, 43.78, 42.16, 40.18, 39.05];
+
+temp_profiles.C1 = temp_profiles.A1;
+temp_profiles.C2 = [39.992, 39.99, 39.113, 38.235, 37.233, 36.23, 35.23];
+temp_profiles.C3 = temp_profiles.A2;
+temp_profiles.C4 = [32.117, 31.91, 31.375, 30.84, 30.228, 29.617, 29.007];
+temp_profiles.C5 = temp_profiles.A3;
+temp_profiles.C6 = [32.526, 32.33, 31.857, 30.842, 29.992, 29.139, 28.29];
+temp_profiles.C7 = temp_profiles.A4;
+temp_profiles.C8 = [35.901, 35.38, 34.379, 33.378, 31.091, 30.25, 29.95];
+
+temp_profiles.D1 = temp_profiles.A2;
+temp_profiles.D2 = [28.269, 27.77, 27.6, 27.431, 27.237, 27.044, 26.85];
+temp_profiles.D3 = [27.3, 26.93, 26.834, 26.738, 26.628, 26.518, 26.409];
+temp_profiles.D4 = temp_profiles.A3;
+temp_profiles.D5 = [32.3, 31.87, 29.206, 28.662, 28.043, 27.139, 25.88];
+temp_profiles.D6 = [30.852, 30.02, 29.299, 28.578, 27.751, 26.337, 26.1];
+temp_profiles.D7 = temp_profiles.A4;
+temp_profiles.D8 = [33.11, 32.137, 31.163, 30.051, 28.942, 27.83, 27.83];
+temp_profiles.D9 = [31.84, 30.95, 30.06, 29.039, 28.019, 27.509, 27];
+
+%% Extract -110 mm temperature
+fields = fieldnames(temp_profiles);
+Y = zeros(length(fields),1);
+for i = 1:length(fields)
+    Y(i) = interp1(depth, temp_profiles.(fields{i}), -110, 'linear');
+end
+
+%% Define Parameters for Each Case (24 unique cases)
+ETs = [40 40 40 40 40 70 40 70 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40 40]; 
+Material = [1 2 3 4 1 1 2 2 1 1 2 2 3 3 1 1 1 2 2 2 3 3 3 4];
+Moisture = [0 0 0 0 0 0 0 0 0 1 0 1 0 1 0 0 0 0 0 0 0 0 0 0];
+Thickness = [0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 35 50 20 35 50 20 35 50 20];
+
+data = table(ETs', Material', Moisture', Thickness', Y(1:24), ...
+    'VariableNames', {'ETs','Material','Moisture','Thickness','Temp'});
+
+%% Morris Screening Sensitivity Analysis
+params = ["ETs","Material","Moisture","Thickness"];
+lb = [40,1,0,20];
+ub = [70,4,1,50];
+
+num_factors = length(params);
+num_repeats = 20;
+delta = (ub - lb)/4;
+mu_star = zeros(num_factors,1);
+sigma = zeros(num_factors,1);
+
+for i = 1:num_factors
+    effects = zeros(num_repeats,1);
+    
+    for j = 1:num_repeats
+        base_idx = randi(height(data));
+        x_base = [data.ETs(base_idx), data.Material(base_idx), data.Moisture(base_idx), data.Thickness(base_idx)];
+        y_base = data.Temp(base_idx);
+        
+        % Perturb parameter i
+        x_perturb = x_base;
+        x_perturb(i) = min(ub(i), max(lb(i), x_base(i) + delta(i)));
+        
+        % Find nearest experimental condition
+        dist = sum((table2array(data(:,1:4)) - x_perturb).^2,2);
+        [~, idx_nearest] = min(dist);
+        y_new = data.Temp(idx_nearest);
+        
+        % Elementary effect
+        effects(j) = (y_new - y_base) / delta(i);
+    end
+    
+    mu_star(i) = mean(abs(effects));
+    sigma(i) = std(effects);
+end
+
+%% Display and Plot
+Results = table(params', mu_star, sigma, 'VariableNames', {'Factor','MuStar','Sigma'});
+disp(Results);
+
+figure;
+scatter(mu_star, sigma, 100, 'filled');
+text(mu_star, sigma, params, 'FontSize', 12, 'VerticalAlignment', 'bottom', 'HorizontalAlignment', 'right');
+xlabel('\mu^* (Mean Effect)');
+ylabel('\sigma (Standard Deviation)');
+title('Morris Screening Sensitivity Analysis at -110 mm');
+grid on;
